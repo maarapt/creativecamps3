@@ -1,0 +1,16 @@
+.
+.gitignore
+dist
+dist/index.html
+dist/maara-logo.png
+index.html
+package-lock.json
+package.json
+project-structure.txt
+public
+public/maara-logo.png
+src
+src/App.jsx
+src/index.css
+src/main.jsx
+vite.config.js

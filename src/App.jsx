@@ -146,6 +146,7 @@ const INITIAL_PARTICIPANTS = [
     id: "participant-7",
     name: "Carolina Dias",
     displayName: "Mê.Lo",
+    showLegalName: false,
     email: "carolina.melodias@gmail.com",
     instagram: "@me.lo__",
     group: "Grupo G",
@@ -187,6 +188,7 @@ const INITIAL_PARTICIPANTS = [
     id: "participant-11",
     name: "David Santos",
     displayName: "Swaintz",
+    showLegalName: false,
     email: "prodbyswaintz@gmail.com",
     instagram: "@swaintzz",
     group: "Grupo C",
@@ -495,6 +497,14 @@ function getRoomLabel(roomId) {
 
 function getParticipantDisplayName(participant) {
   return participant.displayName ?? participant.name;
+}
+
+function shouldShowParticipantLegalName(participant) {
+  return (
+    Boolean(participant.displayName) &&
+    participant.displayName !== participant.name &&
+    participant.showLegalName !== false
+  );
 }
 
 function getParticipantRoomLabel(participant) {
@@ -1804,48 +1814,53 @@ function OnboardingScreen({ slide, slideIndex, totalSlides, onContinue }) {
 
   return (
     <main className="screen-frame">
-      {showLogoSplash ? (
-        <section className="hero-card hero-card--onboarding">
-          <div className="logo-splash animated-zoom" aria-label="MAARA">
-            <img src="/maara-logo.png" alt="MAARA" className="logo-splash__image" />
+      <div
+        className={`onboarding-layout ${showLogoSplash ? "onboarding-layout--splash" : "onboarding-layout--ready"}`}
+      >
+        <div
+          className={`onboarding-logo ${
+            showLogoSplash
+              ? "onboarding-logo--splash"
+              : slideIndex === 0
+                ? "onboarding-logo--floating"
+                : "onboarding-logo--hidden"
+          }`}
+          aria-label="MAARA"
+        >
+          <img src="/maara-logo.png" alt="MAARA" className="onboarding-logo__image" />
+        </div>
+
+        <section
+          className={`hero-card hero-card--onboarding ${
+            showLogoSplash ? "hero-card--onboarding-hidden" : "hero-card--onboarding-visible"
+          }`}
+        >
+          <div className="hero-brand">
+            <span className="eyebrow">MAARA</span>
+            <span className="eyebrow subtle">Creative Camps® 3</span>
+          </div>
+
+          <div key={slideIndex} className="hero-copy animated-slide">
+            <h1>{slide.title}</h1>
+            <p>{slide.body}</p>
+          </div>
+
+          <div className="progress-row">
+            <div className="progress-dots" aria-label="Progresso do onboarding">
+              {Array.from({ length: totalSlides }).map((_, index) => (
+                <span
+                  key={`dot-${index}`}
+                  className={`progress-dot ${index === slideIndex ? "active" : ""}`}
+                />
+              ))}
+            </div>
+
+            <button type="button" className="primary-button" onClick={onContinue}>
+              Continuar
+            </button>
           </div>
         </section>
-      ) : (
-        <div className="onboarding-layout">
-          {slideIndex === 0 && (
-            <div className="onboarding-logo onboarding-logo--floating animated-slide" aria-label="MAARA">
-              <img src="/maara-logo.png" alt="MAARA" className="onboarding-logo__image" />
-            </div>
-          )}
-
-          <section className="hero-card hero-card--onboarding">
-            <div className="hero-brand">
-              <span className="eyebrow">MAARA</span>
-              <span className="eyebrow subtle">Creative Camps® 3</span>
-            </div>
-
-            <div key={slideIndex} className="hero-copy animated-slide">
-              <h1>{slide.title}</h1>
-              <p>{slide.body}</p>
-            </div>
-
-            <div className="progress-row">
-              <div className="progress-dots" aria-label="Progresso do onboarding">
-                {Array.from({ length: totalSlides }).map((_, index) => (
-                  <span
-                    key={`dot-${index}`}
-                    className={`progress-dot ${index === slideIndex ? "active" : ""}`}
-                  />
-                ))}
-              </div>
-
-              <button type="button" className="primary-button" onClick={onContinue}>
-                Continuar
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
+      </div>
     </main>
   );
 }
@@ -2454,7 +2469,7 @@ function ParticipantsSection({ participants, onParticipantSelect }) {
             <div className="list-card__header">
               <div>
                 <h3>{getParticipantDisplayName(participant)}</h3>
-                {participant.displayName && participant.displayName !== participant.name && (
+                {shouldShowParticipantLegalName(participant) && (
                   <p>{participant.name}</p>
                 )}
                 <p>{participant.email}</p>
@@ -3271,10 +3286,9 @@ function ParticipantDirectorySection({ participants }) {
             <div className="list-card__header">
               <div>
                 <h3>{getParticipantDisplayName(participant)}</h3>
-                {participant.displayName && participant.displayName !== participant.name && (
+                {shouldShowParticipantLegalName(participant) && (
                   <p>{participant.name}</p>
                 )}
-                <p>{participant.email}</p>
                 {participant.instagram ? (
                   <button
                     type="button"

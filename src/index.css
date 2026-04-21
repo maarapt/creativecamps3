@@ -108,9 +108,11 @@ button {
 
 .onboarding-layout {
   position: relative;
-  width: 100%;
-  display: flex;
-  justify-content: center;
+  width: min(100%, 27rem);
+  margin: 0 auto;
+  display: grid;
+  padding-top: 7.25rem;
+  align-items: center;
 }
 
 .hero-card,
@@ -152,8 +154,11 @@ button {
 }
 
 .hero-card--onboarding {
-  width: min(100%, 27rem);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
+  transition:
+    opacity 320ms ease,
+    transform 320ms ease;
 }
 
 .hero-brand,
@@ -169,37 +174,67 @@ button {
   margin: 2rem 0;
 }
 
-.logo-splash {
-  display: grid;
-  place-items: center;
-  min-height: 26rem;
-  padding: 2rem 1rem;
-}
-
-.logo-splash__image {
-  width: min(100%, 18rem);
-  height: auto;
-  object-fit: contain;
-}
-
 .onboarding-logo {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  z-index: 2;
   display: grid;
   place-items: center;
-  padding: 0.5rem 1rem 0;
+  width: min(100%, 12rem);
+  transform: translateX(-50%);
+  transform-origin: center center;
+  transition:
+    top 520ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 520ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 520ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 240ms ease;
+  will-change: top, transform, width, opacity;
+}
+
+.onboarding-layout--splash {
+  min-height: 32rem;
+}
+
+.onboarding-layout--ready {
+  min-height: auto;
+}
+
+.onboarding-logo--splash {
+  top: 50%;
+  width: min(100%, 18rem);
+  transform: translate(-50%, -50%);
 }
 
 .onboarding-logo--floating {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 1.5rem);
-  transform: translateX(-50%);
+  top: -4.75rem;
   width: min(100%, 12rem);
+  transform: translate(-50%, 0);
+}
+
+.onboarding-logo--hidden {
+  top: -4.75rem;
+  width: min(100%, 12rem);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -0.75rem);
 }
 
 .onboarding-logo__image {
-  width: min(100%, 12rem);
+  width: 100%;
   height: auto;
   object-fit: contain;
+}
+
+.hero-card--onboarding-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(18px) scale(0.985);
+}
+
+.hero-card--onboarding-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
 .hero-copy h1,
@@ -1022,8 +1057,12 @@ button {
     font-size: clamp(1.35rem, 8vw, 2rem);
   }
 
+  .onboarding-layout {
+    padding-top: 6rem;
+  }
+
   .onboarding-logo--floating {
-    bottom: calc(100% + 1rem);
+    top: -4rem;
     width: min(100%, 10rem);
   }
 

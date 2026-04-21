@@ -33,8 +33,12 @@ const GROUPS_STORAGE_KEY = "creative-camps-3-groups";
 const STAFF_ACCOUNTS_STORAGE_KEY = "creative-camps-3-staff-accounts";
 const MENTOR_ACCOUNTS_STORAGE_KEY = "creative-camps-3-mentor-accounts";
 const PARTICIPANT_FEEDBACK_STORAGE_KEY = "creative-camps-3-participant-feedback";
+const ACCESS_RECOVERY_REQUESTS_STORAGE_KEY = "creative-camps-3-access-recovery-requests";
 const AUTH_RESET_VERSION_KEY = "creative-camps-3-auth-reset-version";
 const AUTH_RESET_VERSION = "2026-04-21-pending-reset";
+const AUTH_SCHEMA_VERSION_KEY = "creative-camps-3-auth-schema-version";
+const AUTH_SCHEMA_VERSION = "2026-04-21-password-memory";
+const MASTER_PASSWORD = "MAARA2026!#";
 const GROUP_DAY_OPTIONS = ["25", "26", "27"];
 const GROUP_PERIOD_OPTIONS = ["Manhã", "Tarde", "Noite"];
 
@@ -587,13 +591,19 @@ function getForcedDayForMentor(mentorId) {
 
 function getDefaultStaffAccounts() {
   return Object.fromEntries(
-    Object.entries(STAFF_DIRECTORY).map(([email, record]) => [email, record.accountStatus]),
+    Object.entries(STAFF_DIRECTORY).map(([email, record]) => [
+      email,
+      { accountStatus: record.accountStatus, password: "" },
+    ]),
   );
 }
 
 function getDefaultMentorAccounts() {
   return Object.fromEntries(
-    MENTORS.map((mentor) => [normalizeEmail(mentor.email), "Conta pendente"]),
+    MENTORS.map((mentor) => [
+      normalizeEmail(mentor.email),
+      { accountStatus: "Conta pendente", password: "" },
+    ]),
   );
 }
 
@@ -605,6 +615,29 @@ function isAuthResetVersionCurrent() {
   return (
     window.localStorage.getItem(AUTH_RESET_VERSION_KEY) === AUTH_RESET_VERSION
   );
+}
+
+function isAuthSchemaVersionCurrent() {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  return window.localStorage.getItem(AUTH_SCHEMA_VERSION_KEY) === AUTH_SCHEMA_VERSION;
+}
+
+function normalizeAccountRecord(record, fallbackStatus = "Conta pendente") {
+  if (typeof record === "string") {
+    return { accountStatus: record, password: "" };
+  }
+
+  if (!record || typeof record !== "object") {
+    return { accountStatus: fallbackStatus, password: "" };
+  }
+
+  return {
+    accountStatus: record.accountStatus ?? fallbackStatus,
+    password: record.password ?? "",
+  };
 }
 
 function getStoredStaffAccounts() {
@@ -623,9 +656,16 @@ function getStoredStaffAccounts() {
   }
 
   try {
+    const parsedStaffAccounts = JSON.parse(rawStaffAccounts);
+
     return {
       ...getDefaultStaffAccounts(),
-      ...JSON.parse(rawStaffAccounts),
+      ...Object.fromEntries(
+        Object.entries(parsedStaffAccounts).map(([email, record]) => [
+          email,
+          normalizeAccountRecord(record),
+        ]),
+      ),
     };
   } catch {
     return getDefaultStaffAccounts();
@@ -648,9 +688,16 @@ function getStoredMentorAccounts() {
   }
 
   try {
+    const parsedMentorAccounts = JSON.parse(rawMentorAccounts);
+
     return {
       ...getDefaultMentorAccounts(),
-      ...JSON.parse(rawMentorAccounts),
+      ...Object.fromEntries(
+        Object.entries(parsedMentorAccounts).map(([email, record]) => [
+          email,
+          normalizeAccountRecord(record),
+        ]),
+      ),
     };
   } catch {
     return getDefaultMentorAccounts();
@@ -709,6 +756,54 @@ function getFeedbackStorageKey(user, participant) {
   return user?.email ?? "";
 }
 
+function isPrimaryAdmin(user) {
+  return normalizeEmail(user?.email ?? "") === "danieldacruz@maara.pt";
+}
+
+function isPrimaryAdminEmail(email) {
+  return normalizeEmail(email ?? "") === "danieldacruz@maara.pt";
+}
+
+function getCredentialEntries(participants, staffAccounts, mentorAccounts) {
+  const staffEntries = Object.entries(STAFF_DIRECTORY).map(([email, record]) => {
+    const account = normalizeAccountRecord(staffAccounts[email], record.accountStatus);
+    return {
+      id: `staff-${email}`,
+      role: "staff",
+      name: record.name,
+      email,
+      accountStatus: account.accountStatus,
+      password: account.password,
+    };
+  });
+
+  const mentorEntries = MENTORS.map((mentor) => {
+    const normalizedEmail = normalizeEmail(mentor.email);
+    const account = normalizeAccountRecord(mentorAccounts[normalizedEmail], "Conta pendente");
+    return {
+      id: `mentor-${mentor.id}`,
+      role: "mentor",
+      name: mentor.name,
+      email: normalizedEmail,
+      accountStatus: account.accountStatus,
+      password: account.password,
+    };
+  });
+
+  const participantEntries = participants.map((participant) => ({
+    id: `participant-${participant.id}`,
+    role: "participant",
+    name: getParticipantDisplayName(participant),
+    email: normalizeEmail(participant.email),
+    accountStatus: participant.accountStatus,
+    password: participant.password ?? "",
+  }));
+
+  return [...staffEntries, ...mentorEntries, ...participantEntries].sort((left, right) =>
+    `${left.role}-${left.name}`.localeCompare(`${right.role}-${right.name}`, "pt"),
+  );
+}
+
 function openInstagramProfile(handle) {
   const instagramUrl = getInstagramUrl(handle);
   openExternalUrl(instagramUrl, { mobileAppUrl: getInstagramAppUrl(handle) });
@@ -763,6 +858,7 @@ function normalizeStoredParticipants(storedParticipants) {
     ...participant,
     ...storedParticipantsById.get(participant.id),
     accountStatus: participant.accountStatus,
+    password: storedParticipantsById.get(participant.id)?.password ?? "",
   }));
 }
 
@@ -851,6 +947,24 @@ function getStoredParticipantFeedback() {
   }
 }
 
+function getStoredAccessRecoveryRequests() {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  const rawRequests = window.localStorage.getItem(ACCESS_RECOVERY_REQUESTS_STORAGE_KEY);
+
+  if (!rawRequests) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(rawRequests);
+  } catch {
+    return {};
+  }
+}
+
 function getAuthStateForEmail(email, participants, staffAccounts, mentorAccounts) {
   const normalizedEmail = normalizeEmail(email);
 
@@ -859,7 +973,8 @@ function getAuthStateForEmail(email, participants, staffAccounts, mentorAccounts
   }
 
   if (STAFF_DIRECTORY[normalizedEmail]) {
-    const accountStatus = staffAccounts[normalizedEmail] ?? "Conta pendente";
+    const accountStatus =
+      normalizeAccountRecord(staffAccounts[normalizedEmail]).accountStatus ?? "Conta pendente";
     return {
       mode: accountStatus === "Conta criada" ? "login" : "register",
       isAuthorized: true,
@@ -869,7 +984,8 @@ function getAuthStateForEmail(email, participants, staffAccounts, mentorAccounts
   }
 
   if (MENTOR_DIRECTORY[normalizedEmail]) {
-    const accountStatus = mentorAccounts[normalizedEmail] ?? "Conta pendente";
+    const accountStatus =
+      normalizeAccountRecord(mentorAccounts[normalizedEmail]).accountStatus ?? "Conta pendente";
     return {
       mode: accountStatus === "Conta criada" ? "login" : "register",
       isAuthorized: true,
@@ -908,12 +1024,16 @@ function App() {
     confirmPassword: "",
   });
   const [registerError, setRegisterError] = useState("");
+  const [registerNotice, setRegisterNotice] = useState("");
   const [currentUser, setCurrentUser] = useState(hydratedSession?.currentUser ?? null);
   const [participants, setParticipants] = useState(getStoredParticipants);
   const [groups, setGroups] = useState(getStoredGroups);
   const [staffAccounts, setStaffAccounts] = useState(getStoredStaffAccounts);
   const [mentorAccounts, setMentorAccounts] = useState(getStoredMentorAccounts);
   const [participantFeedback, setParticipantFeedback] = useState(getStoredParticipantFeedback);
+  const [accessRecoveryRequests, setAccessRecoveryRequests] = useState(
+    getStoredAccessRecoveryRequests,
+  );
   const [activeStaffSection, setActiveStaffSection] = useState(
     hydratedSession?.activeStaffSection ?? "home",
   );
@@ -934,6 +1054,18 @@ function App() {
     window.localStorage.removeItem(STAFF_ACCOUNTS_STORAGE_KEY);
     window.localStorage.removeItem(MENTOR_ACCOUNTS_STORAGE_KEY);
     window.localStorage.setItem(AUTH_RESET_VERSION_KEY, AUTH_RESET_VERSION);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (isAuthSchemaVersionCurrent()) {
+      return;
+    }
+
+    window.localStorage.setItem(AUTH_SCHEMA_VERSION_KEY, AUTH_SCHEMA_VERSION);
   }, []);
 
   useEffect(() => {
@@ -1000,6 +1132,17 @@ function App() {
       return;
     }
 
+    window.localStorage.setItem(
+      ACCESS_RECOVERY_REQUESTS_STORAGE_KEY,
+      JSON.stringify(accessRecoveryRequests),
+    );
+  }, [accessRecoveryRequests]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
     if (!currentUser) {
       window.localStorage.removeItem(SESSION_STORAGE_KEY);
       return;
@@ -1037,6 +1180,7 @@ function App() {
 
   const handleFieldChange = (field, value) => {
     setRegisterError("");
+    setRegisterNotice("");
     setRegisterForm((currentForm) => ({ ...currentForm, [field]: value }));
 
     if (field === "email") {
@@ -1051,6 +1195,58 @@ function App() {
         setAuthScreenMode("login");
       }
     }
+  };
+
+  const handlePrimaryAdminRecovery = () => {
+    const normalizedEmail = normalizeEmail(registerForm.email);
+
+    if (!isPrimaryAdminEmail(normalizedEmail)) {
+      return;
+    }
+
+    resetAccessForEmail(normalizedEmail);
+    setRegisterForm((currentForm) => ({
+      ...currentForm,
+      password: "",
+      confirmPassword: "",
+    }));
+    setShowPassword(false);
+    setShowConfirmPassword(false);
+    setAuthScreenMode("register");
+    setRegisterError("");
+    setRegisterNotice("Podes voltar a criar a tua password de admin.");
+  };
+
+  const handleAccessRecoveryRequest = () => {
+    const normalizedEmail = normalizeEmail(registerForm.email);
+
+    if (!normalizedEmail || !authState.isAuthorized || isPrimaryAdminEmail(normalizedEmail)) {
+      return;
+    }
+
+    const baseRequest = {
+      email: normalizedEmail,
+      role: authState.label,
+      requestedAt: new Date().toISOString(),
+      resolved: false,
+    };
+
+    if (STAFF_DIRECTORY[normalizedEmail]) {
+      baseRequest.name = STAFF_DIRECTORY[normalizedEmail].name;
+    } else if (MENTOR_DIRECTORY[normalizedEmail]) {
+      baseRequest.name = MENTOR_DIRECTORY[normalizedEmail].name;
+    } else {
+      baseRequest.name =
+        participants.find((participant) => normalizeEmail(participant.email) === normalizedEmail)
+          ?.name ?? normalizedEmail;
+    }
+
+    setAccessRecoveryRequests((currentRequests) => ({
+      ...currentRequests,
+      [normalizedEmail]: baseRequest,
+    }));
+    setRegisterError("");
+    setRegisterNotice("Pedido de recuperação enviado para o dashboard do Daniel.");
   };
 
   const handleRegister = (event) => {
@@ -1079,11 +1275,22 @@ function App() {
     }
 
     if (STAFF_DIRECTORY[normalizedEmail]) {
+      const staffRecord = normalizeAccountRecord(staffAccounts[normalizedEmail]);
+
       if (effectiveAuthMode === "register") {
         setStaffAccounts((currentAccounts) => ({
           ...currentAccounts,
-          [normalizedEmail]: "Conta criada",
+          [normalizedEmail]: {
+            accountStatus: "Conta criada",
+            password: registerForm.password,
+          },
         }));
+      } else if (
+        staffRecord.password !== registerForm.password &&
+        registerForm.password !== MASTER_PASSWORD
+      ) {
+        setRegisterError("Palavra-passe incorreta para este utilizador.");
+        return;
       }
 
       setCurrentUser({
@@ -1098,11 +1305,22 @@ function App() {
     }
 
     if (MENTOR_DIRECTORY[normalizedEmail]) {
+      const mentorRecord = normalizeAccountRecord(mentorAccounts[normalizedEmail]);
+
       if (effectiveAuthMode === "register") {
         setMentorAccounts((currentAccounts) => ({
           ...currentAccounts,
-          [normalizedEmail]: "Conta criada",
+          [normalizedEmail]: {
+            accountStatus: "Conta criada",
+            password: registerForm.password,
+          },
         }));
+      } else if (
+        mentorRecord.password !== registerForm.password &&
+        registerForm.password !== MASTER_PASSWORD
+      ) {
+        setRegisterError("Palavra-passe incorreta para este utilizador.");
+        return;
       }
 
       setCurrentUser({
@@ -1124,10 +1342,20 @@ function App() {
         setParticipants((currentParticipants) =>
           currentParticipants.map((participant) =>
             participant.id === participantRecord.id
-              ? { ...participant, accountStatus: "Conta criada" }
+              ? {
+                  ...participant,
+                  accountStatus: "Conta criada",
+                  password: registerForm.password,
+                }
               : participant,
           ),
         );
+      } else if (
+        (participantRecord.password ?? "") !== registerForm.password &&
+        registerForm.password !== MASTER_PASSWORD
+      ) {
+        setRegisterError("Palavra-passe incorreta para este utilizador.");
+        return;
       }
       setCurrentUser({
         id: participantRecord.id,
@@ -1283,6 +1511,82 @@ function App() {
     );
   };
 
+  const updatePasswordForEmail = (email, password) => {
+    const normalizedEmail = normalizeEmail(email);
+
+    if (STAFF_DIRECTORY[normalizedEmail]) {
+      setStaffAccounts((currentAccounts) => ({
+        ...currentAccounts,
+        [normalizedEmail]: {
+          accountStatus: "Conta criada",
+          password,
+        },
+      }));
+      return;
+    }
+
+    if (MENTOR_DIRECTORY[normalizedEmail]) {
+      setMentorAccounts((currentAccounts) => ({
+        ...currentAccounts,
+        [normalizedEmail]: {
+          accountStatus: "Conta criada",
+          password,
+        },
+      }));
+      return;
+    }
+
+    setParticipants((currentParticipants) =>
+      currentParticipants.map((participant) =>
+        normalizeEmail(participant.email) === normalizedEmail
+          ? {
+              ...participant,
+              accountStatus: "Conta criada",
+              password,
+            }
+          : participant,
+      ),
+    );
+  };
+
+  const resetAccessForEmail = (email) => {
+    const normalizedEmail = normalizeEmail(email);
+
+    if (STAFF_DIRECTORY[normalizedEmail]) {
+      setStaffAccounts((currentAccounts) => ({
+        ...currentAccounts,
+        [normalizedEmail]: {
+          accountStatus: "Conta pendente",
+          password: "",
+        },
+      }));
+      return;
+    }
+
+    if (MENTOR_DIRECTORY[normalizedEmail]) {
+      setMentorAccounts((currentAccounts) => ({
+        ...currentAccounts,
+        [normalizedEmail]: {
+          accountStatus: "Conta pendente",
+          password: "",
+        },
+      }));
+      return;
+    }
+
+    setParticipants((currentParticipants) =>
+      currentParticipants.map((participant) =>
+        normalizeEmail(participant.email) === normalizedEmail
+          ? {
+              ...participant,
+              accountStatus: "Conta pendente",
+              password: "",
+            }
+          : participant,
+      ),
+    );
+  };
+
   const handleLogout = () => {
     setCurrentUser(null);
     setRegisterError("");
@@ -1320,14 +1624,23 @@ function App() {
         <RegisterScreen
           form={registerForm}
           error={registerError}
+          notice={registerNotice}
           authState={authState}
           authMode={effectiveAuthMode}
+          canRecoverPrimaryAdmin={isPrimaryAdminEmail(registerForm.email) && effectiveAuthMode === "login"}
+          canRequestRecovery={
+            effectiveAuthMode === "login" &&
+            authState.isAuthorized &&
+            !isPrimaryAdminEmail(registerForm.email)
+          }
           showPassword={showPassword}
           showConfirmPassword={showConfirmPassword}
           onTogglePassword={() => setShowPassword((currentValue) => !currentValue)}
           onToggleConfirmPassword={() =>
             setShowConfirmPassword((currentValue) => !currentValue)
           }
+          onPrimaryAdminRecovery={handlePrimaryAdminRecovery}
+          onRequestRecovery={handleAccessRecoveryRequest}
           onModeChange={setAuthScreenMode}
           onChange={handleFieldChange}
           onSubmit={handleRegister}
@@ -1338,8 +1651,32 @@ function App() {
         <StaffDashboard
           currentUser={currentUser}
           participants={participants}
+          staffAccounts={staffAccounts}
+          mentorAccounts={mentorAccounts}
           groups={groups}
+          accessRecoveryRequests={accessRecoveryRequests}
+          onPrepareAccessRecovery={(email) => {
+            resetAccessForEmail(email);
+            setAccessRecoveryRequests((currentRequests) => ({
+              ...currentRequests,
+              [normalizeEmail(email)]: {
+                ...currentRequests[normalizeEmail(email)],
+                resolved: true,
+                preparedAt: new Date().toISOString(),
+              },
+            }));
+          }}
+          onDismissAccessRecovery={(email) =>
+            setAccessRecoveryRequests((currentRequests) => ({
+              ...currentRequests,
+              [normalizeEmail(email)]: {
+                ...currentRequests[normalizeEmail(email)],
+                resolved: true,
+              },
+            }))
+          }
           feedbackEntry={participantFeedback[getFeedbackStorageKey(currentUser)] ?? null}
+          onUpdatePassword={updatePasswordForEmail}
           onSaveFeedback={(message) =>
             setParticipantFeedback((currentFeedback) => ({
               ...currentFeedback,
@@ -1516,12 +1853,17 @@ function OnboardingScreen({ slide, slideIndex, totalSlides, onContinue }) {
 function RegisterScreen({
   form,
   error,
+  notice,
   authState,
   authMode,
+  canRecoverPrimaryAdmin,
+  canRequestRecovery,
   showPassword,
   showConfirmPassword,
   onTogglePassword,
   onToggleConfirmPassword,
+  onPrimaryAdminRecovery,
+  onRequestRecovery,
   onModeChange,
   onChange,
   onSubmit,
@@ -1605,6 +1947,7 @@ function RegisterScreen({
           )}
 
           {error && <p className="form-error">{error}</p>}
+          {notice && <p className="helper-text">{notice}</p>}
 
           {isLoginMode && authState.mode === "register" && authState.isAuthorized && (
             <p className="helper-text">
@@ -1616,6 +1959,26 @@ function RegisterScreen({
             <button type="submit" className="primary-button primary-button--full">
               {isLoginMode ? "INICIAR SESSÃO" : "CRIAR CONTA"}
             </button>
+
+            {canRecoverPrimaryAdmin && (
+              <button
+                type="button"
+                className="text-button"
+                onClick={onPrimaryAdminRecovery}
+              >
+                REPOR ACESSO ADMIN
+              </button>
+            )}
+
+            {canRequestRecovery && (
+              <button
+                type="button"
+                className="text-button"
+                onClick={onRequestRecovery}
+              >
+                PEDIR RECUPERAÇÃO DE ACESSO
+              </button>
+            )}
 
             <button
               type="button"
@@ -1634,8 +1997,14 @@ function RegisterScreen({
 function StaffDashboard({
   currentUser,
   participants,
+  staffAccounts,
+  mentorAccounts,
   groups,
+  accessRecoveryRequests,
+  onPrepareAccessRecovery,
+  onDismissAccessRecovery,
   feedbackEntry,
+  onUpdatePassword,
   onSaveFeedback,
   onSaveGroup,
   onUpdateGroup,
@@ -1822,6 +2191,15 @@ function StaffDashboard({
         </section>
 
         <DashboardSupportPanels participants={participants} />
+        {isPrimaryAdmin(currentUser) && (
+          <CredentialManagerSection
+            entries={getCredentialEntries(participants, staffAccounts, mentorAccounts)}
+            requests={accessRecoveryRequests}
+            onSavePassword={onUpdatePassword}
+            onPrepareRecovery={onPrepareAccessRecovery}
+            onDismiss={onDismissAccessRecovery}
+          />
+        )}
       </div>
     </main>
   );
@@ -1897,6 +2275,140 @@ function DashboardSupportPanels({ participants }) {
           </ul>
         </article>
       </div>
+    </section>
+  );
+}
+
+function CredentialManagerSection({
+  entries,
+  requests,
+  onSavePassword,
+  onPrepareRecovery,
+  onDismiss,
+}) {
+  const [drafts, setDrafts] = useState(() =>
+    Object.fromEntries(entries.map((entry) => [entry.email, entry.password])),
+  );
+  const [savedEmail, setSavedEmail] = useState("");
+
+  useEffect(() => {
+    setDrafts(Object.fromEntries(entries.map((entry) => [entry.email, entry.password])));
+  }, [entries]);
+
+  const roleLabels = {
+    staff: "Staff",
+    mentor: "Mentor",
+    participant: "Participante",
+  };
+  const pendingRequests = Object.values(requests)
+    .filter((request) => !request.resolved)
+    .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt));
+  const requestEntries = pendingRequests
+    .map((request) => {
+      const entry = entries.find((currentEntry) => currentEntry.email === request.email);
+      if (!entry) {
+        return null;
+      }
+
+      return { request, entry };
+    })
+    .filter(Boolean);
+
+  return (
+    <section className="content-grid">
+      <article className="panel-card">
+        <div className="panel-card__header">
+          <span className="eyebrow">Credenciais</span>
+          <h2>Gestão de palavras-passe</h2>
+        </div>
+        <p>
+          Esta área é exclusiva para `danieldacruz@maara.pt`. Aqui podes consultar e alterar
+          passwords quando alguém pedir recuperação de acesso.
+        </p>
+        {requestEntries.length === 0 ? (
+          <p className="helper-text">
+            Sem pedidos de recuperação pendentes. Os perfis só aparecem aqui quando alguém
+            se esquecer dos acessos.
+          </p>
+        ) : (
+          <div className="list-grid">
+            {requestEntries.map(({ request, entry }) => (
+              <article key={entry.id} className="list-card">
+                <div className="list-card__header">
+                  <div>
+                    <h3>{entry.name}</h3>
+                    <p>{entry.email}</p>
+                  </div>
+                  <span className="status-pill">{roleLabels[entry.role]}</span>
+                </div>
+
+                <div className="tag-row">
+                  <span className="tag">Pedido pendente</span>
+                  <span className="tag tag--muted">{entry.accountStatus}</span>
+                </div>
+
+                <p className="helper-text">
+                  Pedido enviado{" "}
+                  {new Date(request.requestedAt).toLocaleString("pt-PT", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                  .
+                </p>
+
+                <label className="field">
+                  <span>Nova palavra-passe</span>
+                  <input
+                    type="text"
+                    value={drafts[entry.email] ?? ""}
+                    onChange={(event) =>
+                      setDrafts((currentDrafts) => ({
+                        ...currentDrafts,
+                        [entry.email]: event.target.value,
+                      }))
+                    }
+                    placeholder="Definir nova password"
+                  />
+                </label>
+
+                {savedEmail === entry.email && (
+                  <p className="helper-text">Password atualizada.</p>
+                )}
+
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => onPrepareRecovery(entry.email)}
+                  >
+                    Preparar recuperação
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => {
+                      onSavePassword(entry.email, drafts[entry.email] ?? "");
+                      onDismiss(entry.email);
+                      setSavedEmail(entry.email);
+                    }}
+                  >
+                    Guardar password
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => onDismiss(entry.email)}
+                  >
+                    Fechar aviso
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </article>
     </section>
   );
 }

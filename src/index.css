@@ -351,8 +351,7 @@ button {
 .primary-button:hover,
 .secondary-button:hover,
 .ghost-button:hover,
-.modal-close:hover,
-.staff-nav-card:hover {
+.modal-close:hover {
   transform: translateY(-1px);
 }
 
@@ -534,6 +533,11 @@ button {
   padding: 1rem;
   text-align: center;
   background: #00b0af;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
 }
 
 .staff-nav-card.active {
@@ -587,6 +591,11 @@ button {
   text-align: center;
   border: 1px solid var(--border-soft);
   background: #00b0af;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
 }
 
 .metric-card span {
@@ -604,9 +613,17 @@ button {
 }
 
 .metric-card--interactive:hover {
-  transform: translateY(-1px);
+  transform: translateY(-4px);
+  box-shadow: 0 18px 34px rgba(55, 31, 89, 0.16);
   border-color: rgba(0, 176, 175, 0.32);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(0, 176, 175, 0.08));
+  background: #00b0af;
+}
+
+.staff-nav-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 34px rgba(55, 31, 89, 0.16);
+  border-color: rgba(0, 176, 175, 0.32);
+  background: #00b0af;
 }
 
 .metric-card:disabled {

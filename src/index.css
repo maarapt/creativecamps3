@@ -395,11 +395,23 @@ button {
   min-height: 3rem;
 }
 
+.back-button {
+  background: linear-gradient(135deg, rgba(0, 176, 175, 0.16), rgba(105, 65, 147, 0.16));
+  border: 1px solid rgba(0, 176, 175, 0.24);
+  color: var(--purple);
+  box-shadow: 0 12px 24px rgba(55, 31, 89, 0.08);
+}
+
 .primary-button:hover,
 .secondary-button:hover,
 .ghost-button:hover,
 .modal-close:hover {
   transform: translateY(-1px);
+}
+
+.back-button:hover {
+  border-color: rgba(0, 176, 175, 0.34);
+  box-shadow: 0 16px 28px rgba(55, 31, 89, 0.12);
 }
 
 .primary-button:disabled,
@@ -1138,5 +1150,251 @@ button {
 
   .staff-nav-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.store-entry-button {
+  position: fixed;
+  top: max(1rem, env(safe-area-inset-top));
+  right: max(1rem, env(safe-area-inset-right));
+  z-index: 4;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.8rem 1rem;
+  background: rgba(255, 252, 247, 0.92);
+  color: var(--purple);
+  font-weight: 700;
+  box-shadow: 0 18px 40px rgba(55, 31, 89, 0.14);
+}
+
+.storefront-frame {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 74rem);
+  margin: 0 auto;
+  padding: 4.75rem 0 3rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.storefront-hero,
+.storefront-layout,
+.storefront-highlights,
+.storefront-faq,
+.storefront-product-grid,
+.storefront-stat-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.storefront-hero {
+  align-items: center;
+}
+
+.storefront-hero__copy,
+.storefront-hero__visual,
+.merch-card,
+.storefront-cart,
+.storefront-highlight-card,
+.storefront-faq-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.storefront-hero__copy h1,
+.storefront-section-intro h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  line-height: 0.98;
+  letter-spacing: 0.02em;
+}
+
+.storefront-hero__copy h1 {
+  font-size: clamp(2rem, 6vw, 4rem);
+}
+
+.storefront-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.storefront-button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.storefront-hero__visual {
+  padding: 1.15rem;
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at top left, rgba(0, 176, 175, 0.2), transparent 36%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(248, 238, 226, 0.88));
+  border: 1px solid var(--border-soft);
+}
+
+.storefront-hero__logo {
+  width: min(100%, 10rem);
+  height: auto;
+}
+
+.storefront-stat-card,
+.storefront-highlight-card {
+  padding: 1.1rem;
+}
+
+.storefront-stat-card {
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(105, 65, 147, 0.12);
+}
+
+.storefront-stat-card strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 1rem;
+}
+
+.storefront-section-intro {
+  margin-bottom: 1rem;
+}
+
+.storefront-product-grid {
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.merch-card {
+  padding: 1rem;
+}
+
+.merch-card__visual {
+  min-height: 10rem;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  color: white;
+  display: grid;
+  align-content: space-between;
+}
+
+.merch-card__visual strong {
+  font-family: var(--font-display);
+  font-size: 1.7rem;
+  line-height: 0.95;
+}
+
+.merch-card__visual--pink {
+  background: linear-gradient(135deg, #e13976, #694193);
+}
+
+.merch-card__visual--purple {
+  background: linear-gradient(135deg, #694193, #31204a);
+}
+
+.merch-card__visual--turquoise {
+  background: linear-gradient(135deg, #00b0af, #2d8f8e);
+}
+
+.merch-card__visual--yellow {
+  background: linear-gradient(135deg, #e8b94b, #c97b2f);
+}
+
+.merch-card__content {
+  display: grid;
+  gap: 1rem;
+}
+
+.merch-card__details {
+  margin: 0;
+  padding-left: 1rem;
+  color: var(--ink-soft);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.storefront-cart {
+  padding: 1.1rem;
+  align-self: start;
+}
+
+.storefront-empty {
+  padding: 1rem;
+}
+
+.storefront-cart-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.storefront-cart-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.85rem 0.9rem;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(105, 65, 147, 0.1);
+}
+
+.storefront-cart-item div span {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--ink-soft);
+}
+
+.storefront-cart-item__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.storefront-qty-button {
+  min-height: 2.35rem;
+  min-width: 2.35rem;
+  padding: 0;
+}
+
+.storefront-totals {
+  display: grid;
+  gap: 0.45rem;
+  padding-top: 0.5rem;
+}
+
+.storefront-total-row {
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(105, 65, 147, 0.12);
+}
+
+.storefront-checkout-form textarea {
+  resize: vertical;
+}
+
+.storefront-faq {
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.storefront-faq-card {
+  padding: 1rem;
+}
+
+@media (min-width: 920px) {
+  .storefront-hero {
+    grid-template-columns: minmax(0, 1.1fr) minmax(19rem, 0.9fr);
+  }
+
+  .storefront-highlights {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .storefront-layout {
+    grid-template-columns: minmax(0, 1.3fr) minmax(19rem, 0.7fr);
+    align-items: start;
+  }
+
+  .storefront-cart {
+    position: sticky;
+    top: 6rem;
   }
 }

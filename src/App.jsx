@@ -1,4 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  fetchRemoteSnapshot,
+  getRemoteSession,
+  isSupabaseEnabled,
+  replaceFeedbackEntriesInSupabase,
+  replaceGroupsInSupabase,
+  signInWithSupabase,
+  signOutWithSupabase,
+  signUpWithSupabase,
+  upsertAuthorizedUsersInSupabase,
+  upsertRecoveryRequestsInSupabase,
+} from "./lib/supabase";
 
 const ONBOARDING_SLIDES = [
   {
@@ -12,6 +24,84 @@ const ONBOARDING_SLIDES = [
   {
     title: "Aqui vais poder descobrir grupos, consultar ementas e dar feedback.",
     body: "O conteúdo vai sendo atualizado durante o evento, de forma clara e rápida.",
+  },
+];
+
+const SHOP_CONTACT_EMAIL = "loja@maara.pt";
+
+const MERCH_PRODUCTS = [
+  {
+    id: "tee-signature",
+    name: "Signature Tee",
+    price: 28,
+    description: "T-shirt oversized em algodão pesado, pensada para drops curtos e uso diário.",
+    sizes: ["XS", "S", "M", "L", "XL"],
+    accent: "pink",
+    tag: "Best seller",
+    details: ["220 gsm", "Frente minimal", "Costas com graphic MAARA"],
+  },
+  {
+    id: "hoodie-afterhours",
+    name: "After Hours Hoodie",
+    price: 62,
+    description: "Hoodie premium para coleções cápsula, com foco em conforto e presença visual.",
+    sizes: ["S", "M", "L", "XL"],
+    accent: "purple",
+    tag: "Drop limitado",
+    details: ["Interior cardado", "Corte relaxed", "Etiqueta MAARA bordada"],
+  },
+  {
+    id: "tote-studio",
+    name: "Studio Tote",
+    price: 22,
+    description: "Tote bag resistente para merch acessível, fácil de enviar e simples de personalizar.",
+    sizes: ["Único"],
+    accent: "turquoise",
+    tag: "Acessório",
+    details: ["Lona reforçada", "Bolso interior", "Ideal para bundles"],
+  },
+  {
+    id: "cap-archive",
+    name: "Archive Cap",
+    price: 32,
+    description: "Boné estruturado para completar o look do drop e criar ticket médio mais alto.",
+    sizes: ["Único"],
+    accent: "yellow",
+    tag: "Novo",
+    details: ["Fecho ajustável", "Bordado frontal", "Produção simples"],
+  },
+];
+
+const STORE_HIGHLIGHTS = [
+  {
+    title: "Loja integrada no site",
+    body: "A loja vive dentro da experiência MAARA, sem obrigar o utilizador a sair para outra plataforma.",
+  },
+  {
+    title: "Carrinho funcional",
+    body: "Já permite escolher tamanho, somar peças e preparar um pedido com resumo automático.",
+  },
+  {
+    title: "Checkout leve",
+    body: "O pedido pode seguir por e-mail imediatamente, enquanto decidimos se vale integrar pagamentos.",
+  },
+];
+
+const STORE_FAQS = [
+  {
+    question: "Como funciona o checkout?",
+    answer:
+      "Nesta primeira versão, o visitante monta o carrinho e envia o pedido por e-mail para a equipa MAARA.",
+  },
+  {
+    question: "Dá para trocar os produtos?",
+    answer:
+      "Sim. Os artigos estão centralizados num único array, por isso é simples editar preços, tamanhos e descrições.",
+  },
+  {
+    question: "E pagamentos online?",
+    answer:
+      "A base da loja já está pronta. O próximo passo natural é ligar Stripe, Shopify Buy Button ou outra solução de pagamento.",
   },
 ];
 
@@ -41,6 +131,7 @@ const AUTH_SCHEMA_VERSION = "2026-04-21-password-memory";
 const MASTER_PASSWORD = "MAARA2026!#";
 const GROUP_DAY_OPTIONS = ["25", "26", "27"];
 const GROUP_PERIOD_OPTIONS = ["Manhã", "Tarde", "Noite"];
+const MAX_GROUP_PARTICIPANTS = 5;
 
 const STAFF_DIRECTORY = {
   "danieldacruz@maara.pt": {
@@ -63,6 +154,13 @@ const STAFF_DIRECTORY = {
     role: "staff",
     accountStatus: "Conta pendente",
   },
+};
+
+const STAFF_IDS = {
+  "danieldacruz@maara.pt": "staff-daniel",
+  "sofiacecilio@maara.pt": "staff-sofia",
+  "mariabarreira@maara.pt": "staff-maria",
+  "gadunhas@maara.pt": "staff-gadunhas",
 };
 
 const ROOMS = [
@@ -370,7 +468,7 @@ const GENERAL_PROGRAM = [
   {
     day: "Dia 25 — Chegar & ligar",
     items: [
-      "16h — Check-in",
+      "17h — Check-in",
       "Welcome drink",
       "Apresentação do camp",
       "Jantar",
@@ -409,7 +507,7 @@ const INTERNAL_PLAN = [
   {
     day: "Dia 25 — Chegada, desbloqueio e conexão",
     items: [
-      "17h00 — Check-in + Welcome Drink",
+      "16h00 — Check-in + Welcome Drink",
       "Receção informal + fotografia à chegada",
       "Apresentação MAARA + apresentação dos mentores",
       "Explicação geral da dinâmica",
@@ -766,6 +864,228 @@ function getFeedbackStorageKey(user, participant) {
   return user?.email ?? "";
 }
 
+function getScreenForRole(role) {
+  if (role === "staff") {
+    return "staff";
+  }
+
+  if (role === "mentor") {
+    return "mentor";
+  }
+
+  return "participant";
+}
+
+function buildCurrentUserFromAuthorizedUser(authorizedUser) {
+  if (!authorizedUser) {
+    return null;
+  }
+
+  return {
+    id: authorizedUser.role === "participant" ? authorizedUser.id : undefined,
+    name: authorizedUser.full_name,
+    email: normalizeEmail(authorizedUser.email),
+    role: authorizedUser.role,
+    accountStatus: authorizedUser.account_status,
+  };
+}
+
+function applyAuthorizedUsersToParticipants(participants, authorizedUsers) {
+  const authorizedUserMap = new Map(
+    authorizedUsers.map((authorizedUser) => [authorizedUser.id, authorizedUser]),
+  );
+
+  return participants.map((participant) => {
+    const remoteRecord = authorizedUserMap.get(participant.id);
+
+    if (!remoteRecord) {
+      return participant;
+    }
+
+    return {
+      ...participant,
+      name: remoteRecord.full_name ?? participant.name,
+      displayName: remoteRecord.display_name ?? participant.displayName,
+      showLegalName:
+        remoteRecord.show_legal_name ?? participant.showLegalName,
+      email: normalizeEmail(remoteRecord.email ?? participant.email),
+      instagram: remoteRecord.instagram ?? participant.instagram,
+      roomId: remoteRecord.room_id ?? participant.roomId ?? null,
+      accountStatus: remoteRecord.account_status ?? participant.accountStatus,
+      notes: remoteRecord.notes ?? participant.notes ?? "",
+      password: "",
+    };
+  });
+}
+
+function applyAuthorizedUsersToAccountMap(seedDirectory, authorizedUsers, role) {
+  const nextEntries = Object.fromEntries(
+    Object.entries(seedDirectory).map(([email, record]) => [
+      email,
+      {
+        accountStatus: record.accountStatus ?? "Conta pendente",
+        password: "",
+      },
+    ]),
+  );
+
+  authorizedUsers
+    .filter((authorizedUser) => authorizedUser.role === role)
+    .forEach((authorizedUser) => {
+      nextEntries[normalizeEmail(authorizedUser.email)] = {
+        accountStatus: authorizedUser.account_status ?? "Conta pendente",
+        password: "",
+      };
+    });
+
+  return nextEntries;
+}
+
+function buildGroupsFromRemote(remoteGroups, remoteGroupMembers) {
+  return remoteGroups.map((group) => ({
+    id: group.id,
+    day: group.day,
+    period: normalizePeriodForDay(group.day, group.period),
+    studio: group.studio,
+    mentorId: group.mentor_id,
+    participantIds: remoteGroupMembers
+      .filter((member) => member.group_id === group.id)
+      .map((member) => member.participant_id),
+    finalLyrics: group.final_lyrics ?? "",
+    sessionFeedback: group.session_feedback ?? "",
+    audioUploadName: group.audio_upload_name ?? "",
+    audioUploadSizeLabel: group.audio_upload_size_label ?? "",
+    isLocked: Boolean(group.is_locked),
+  }));
+}
+
+function buildFeedbackMapFromRemote(feedbackEntries) {
+  return feedbackEntries.reduce((accumulator, entry) => {
+    accumulator[entry.author_key] = {
+      message: entry.message,
+      updatedAt: entry.updated_at,
+      authorEmail: entry.author_email ?? "",
+      authorRole: entry.author_role ?? "",
+    };
+
+    return accumulator;
+  }, {});
+}
+
+function buildRecoveryRequestMapFromRemote(recoveryRequests, authorizedUsers) {
+  const authorizedByEmail = new Map(
+    authorizedUsers.map((authorizedUser) => [
+      normalizeEmail(authorizedUser.email),
+      authorizedUser,
+    ]),
+  );
+
+  return recoveryRequests.reduce((accumulator, request) => {
+    const authorizedUser = authorizedByEmail.get(normalizeEmail(request.email));
+
+    accumulator[normalizeEmail(request.email)] = {
+      email: normalizeEmail(request.email),
+      userId: request.user_id ?? authorizedUser?.id ?? null,
+      name: request.name,
+      role: request.role,
+      requestedAt: request.requested_at,
+      resolved: Boolean(request.resolved),
+      preparedAt: request.prepared_at ?? null,
+    };
+
+    return accumulator;
+  }, {});
+}
+
+function buildRemoteAuthEmailList(profiles) {
+  return profiles.map((profile) => normalizeEmail(profile.email)).filter(Boolean);
+}
+
+function buildAuthorizedUserPayload(participants, staffAccounts, mentorAccounts) {
+  const participantRecords = participants.map((participant) => ({
+    id: participant.id,
+    email: normalizeEmail(participant.email),
+    role: "participant",
+    full_name: participant.name,
+    display_name: participant.displayName ?? null,
+    show_legal_name: participant.showLegalName ?? true,
+    instagram: participant.instagram ?? null,
+    date_label: null,
+    room_id: participant.roomId ?? null,
+    account_status: participant.accountStatus,
+    notes: participant.notes ?? null,
+  }));
+
+  const staffRecords = Object.entries(STAFF_DIRECTORY).map(([email, record]) => ({
+    id: STAFF_IDS[email],
+    email,
+    role: "staff",
+    full_name: record.name,
+    display_name: null,
+    show_legal_name: true,
+    instagram: null,
+    date_label: null,
+    room_id: null,
+    account_status: normalizeAccountRecord(staffAccounts[email], record.accountStatus).accountStatus,
+    notes: null,
+  }));
+
+  const mentorRecords = MENTORS.map((mentor) => ({
+    id: mentor.id,
+    email: normalizeEmail(mentor.email),
+    role: "mentor",
+    full_name: mentor.name,
+    display_name: null,
+    show_legal_name: true,
+    instagram: mentor.instagram ?? null,
+    date_label: mentor.date ?? null,
+    room_id: null,
+    account_status: normalizeAccountRecord(
+      mentorAccounts[normalizeEmail(mentor.email)],
+      "Conta pendente",
+    ).accountStatus,
+    notes: null,
+  }));
+
+  return [...staffRecords, ...mentorRecords, ...participantRecords];
+}
+
+function decorateFeedbackEntries(entries, participants) {
+  return Object.fromEntries(
+    Object.entries(entries).map(([key, entry]) => {
+      if (!entry) {
+        return [key, entry];
+      }
+
+      const participant = participants.find((currentParticipant) => currentParticipant.id === key);
+
+      if (participant) {
+        return [
+          key,
+          {
+            ...entry,
+            authorEmail: normalizeEmail(participant.email),
+            authorRole: "participant",
+          },
+        ];
+      }
+
+      if (key.includes("@")) {
+        const normalizedEmail = normalizeEmail(key);
+        if (STAFF_DIRECTORY[normalizedEmail]) {
+          return [key, { ...entry, authorEmail: normalizedEmail, authorRole: "staff" }];
+        }
+
+        if (MENTOR_DIRECTORY[normalizedEmail]) {
+          return [key, { ...entry, authorEmail: normalizedEmail, authorRole: "mentor" }];
+        }
+      }
+
+      return [key, entry];
+    }),
+  );
+}
+
 function isPrimaryAdmin(user) {
   return normalizeEmail(user?.email ?? "") === "danieldacruz@maara.pt";
 }
@@ -912,6 +1232,45 @@ function getStoredSession() {
   }
 }
 
+function formatPrice(value) {
+  return new Intl.NumberFormat("pt-PT", {
+    style: "currency",
+    currency: "EUR",
+  }).format(value);
+}
+
+function buildMerchCheckoutLink({ customer, cartItems, shipping, total }) {
+  const lines = cartItems.map(
+    (item) =>
+      `- ${item.name} (${item.size}) x${item.quantity} — ${formatPrice(item.price * item.quantity)}`,
+  );
+
+  const note = customer.note.trim()
+    ? `\nNotas do cliente:\n${customer.note.trim()}\n`
+    : "";
+  const subject = `Pedido merch MAARA - ${customer.name.trim() || "novo cliente"}`;
+  const body = [
+    "Olá MAARA,",
+    "",
+    "Quero avançar com este pedido de merch:",
+    ...lines,
+    "",
+    `Subtotal: ${formatPrice(total - shipping)}`,
+    `Envio: ${shipping > 0 ? formatPrice(shipping) : "A confirmar / grátis"}`,
+    `Total estimado: ${formatPrice(total)}`,
+    "",
+    "Dados do cliente:",
+    `Nome: ${customer.name.trim()}`,
+    `Email: ${customer.email.trim()}`,
+    note,
+    "Obrigado.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return `mailto:${SHOP_CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 function getStoredGroups() {
   if (typeof window === "undefined") {
     return [];
@@ -975,8 +1334,16 @@ function getStoredAccessRecoveryRequests() {
   }
 }
 
-function getAuthStateForEmail(email, participants, staffAccounts, mentorAccounts) {
+function getAuthStateForEmail(
+  email,
+  participants,
+  staffAccounts,
+  mentorAccounts,
+  remoteAuthEmails = [],
+  useSupabaseAuthState = false,
+) {
   const normalizedEmail = normalizeEmail(email);
+  const hasRemoteAccount = remoteAuthEmails.includes(normalizedEmail);
 
   if (!normalizedEmail) {
     return { mode: "register", isAuthorized: false, label: "" };
@@ -986,7 +1353,13 @@ function getAuthStateForEmail(email, participants, staffAccounts, mentorAccounts
     const accountStatus =
       normalizeAccountRecord(staffAccounts[normalizedEmail]).accountStatus ?? "Conta pendente";
     return {
-      mode: accountStatus === "Conta criada" ? "login" : "register",
+      mode: useSupabaseAuthState
+        ? hasRemoteAccount
+          ? "login"
+          : "register"
+        : accountStatus === "Conta criada"
+          ? "login"
+          : "register",
       isAuthorized: true,
       label: "staff",
       accountStatus,
@@ -997,7 +1370,13 @@ function getAuthStateForEmail(email, participants, staffAccounts, mentorAccounts
     const accountStatus =
       normalizeAccountRecord(mentorAccounts[normalizedEmail]).accountStatus ?? "Conta pendente";
     return {
-      mode: accountStatus === "Conta criada" ? "login" : "register",
+      mode: useSupabaseAuthState
+        ? hasRemoteAccount
+          ? "login"
+          : "register"
+        : accountStatus === "Conta criada"
+          ? "login"
+          : "register",
       isAuthorized: true,
       label: "mentor",
       accountStatus,
@@ -1013,7 +1392,13 @@ function getAuthStateForEmail(email, participants, staffAccounts, mentorAccounts
   }
 
   return {
-    mode: participantRecord.accountStatus === "Conta criada" ? "login" : "register",
+    mode: useSupabaseAuthState
+      ? hasRemoteAccount
+        ? "login"
+        : "register"
+      : participantRecord.accountStatus === "Conta criada"
+        ? "login"
+        : "register",
     isAuthorized: true,
     label: "participant",
     accountStatus: participantRecord.accountStatus,
@@ -1035,7 +1420,9 @@ function App() {
   });
   const [registerError, setRegisterError] = useState("");
   const [registerNotice, setRegisterNotice] = useState("");
-  const [currentUser, setCurrentUser] = useState(hydratedSession?.currentUser ?? null);
+  const [currentUser, setCurrentUser] = useState(
+    isSupabaseEnabled ? null : hydratedSession?.currentUser ?? null,
+  );
   const [participants, setParticipants] = useState(getStoredParticipants);
   const [groups, setGroups] = useState(getStoredGroups);
   const [staffAccounts, setStaffAccounts] = useState(getStoredStaffAccounts);
@@ -1044,12 +1431,41 @@ function App() {
   const [accessRecoveryRequests, setAccessRecoveryRequests] = useState(
     getStoredAccessRecoveryRequests,
   );
+  const [remoteAuthEmails, setRemoteAuthEmails] = useState([]);
   const [activeStaffSection, setActiveStaffSection] = useState(
     hydratedSession?.activeStaffSection ?? "home",
   );
   const [selectedParticipantId, setSelectedParticipantId] = useState(null);
   const [editingRoomId, setEditingRoomId] = useState(null);
-  const [sessionView, setSessionView] = useState(hydratedSession?.sessionView ?? "general");
+  const [sessionView, setSessionView] = useState(
+    isSupabaseEnabled ? "general" : hydratedSession?.sessionView ?? "general",
+  );
+  const [isRemoteReady, setIsRemoteReady] = useState(!isSupabaseEnabled);
+  const [isRemoteSyncing, setIsRemoteSyncing] = useState(false);
+  const remoteSyncCacheRef = useRef({
+    authorizedUsers: "",
+    groups: "",
+    feedback: "",
+    recoveryRequests: "",
+  });
+
+  const applyRemoteSnapshot = (snapshot) => {
+    setParticipants((currentParticipants) =>
+      applyAuthorizedUsersToParticipants(currentParticipants, snapshot.authorizedUsers),
+    );
+    setRemoteAuthEmails(buildRemoteAuthEmailList(snapshot.profiles ?? []));
+    setStaffAccounts(
+      applyAuthorizedUsersToAccountMap(STAFF_DIRECTORY, snapshot.authorizedUsers, "staff"),
+    );
+    setMentorAccounts(
+      applyAuthorizedUsersToAccountMap(MENTOR_DIRECTORY, snapshot.authorizedUsers, "mentor"),
+    );
+    setGroups(buildGroupsFromRemote(snapshot.groups, snapshot.groupMembers));
+    setParticipantFeedback(buildFeedbackMapFromRemote(snapshot.feedbackEntries));
+    setAccessRecoveryRequests(
+      buildRecoveryRequestMapFromRemote(snapshot.recoveryRequests, snapshot.authorizedUsers),
+    );
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1079,6 +1495,10 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (isSupabaseEnabled) {
+      return;
+    }
+
     if (hydratedSession?.currentUser?.role === "staff") {
       setScreen("staff");
       return;
@@ -1095,7 +1515,66 @@ function App() {
   }, [hydratedSession]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (!isSupabaseEnabled) {
+      return undefined;
+    }
+
+    let isActive = true;
+
+    const bootstrapRemoteState = async () => {
+      try {
+        const [session, snapshot] = await Promise.all([
+          getRemoteSession(),
+          fetchRemoteSnapshot(),
+        ]);
+
+        if (!isActive) {
+          return;
+        }
+
+        applyRemoteSnapshot(snapshot);
+
+        if (session?.user?.email) {
+          const normalizedEmail = normalizeEmail(session.user.email);
+          const authorizedUser = snapshot.authorizedUsers.find(
+            (candidate) => normalizeEmail(candidate.email) === normalizedEmail,
+          );
+
+          if (authorizedUser) {
+            setCurrentUser(buildCurrentUserFromAuthorizedUser(authorizedUser));
+            setScreen(getScreenForRole(authorizedUser.role));
+            if (authorizedUser.role === "staff") {
+              setActiveStaffSection("home");
+            }
+          } else {
+            setCurrentUser(null);
+            setScreen("register");
+          }
+        }
+
+        setIsRemoteReady(true);
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        setRegisterNotice(
+          error.message ||
+            "Não foi possível ligar ao Supabase. A app continua pronta para configuração.",
+        );
+        setIsRemoteReady(true);
+      }
+    };
+
+    bootstrapRemoteState();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || isSupabaseEnabled) {
       return;
     }
 
@@ -1103,7 +1582,7 @@ function App() {
   }, [mentorAccounts]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || isSupabaseEnabled) {
       return;
     }
 
@@ -1111,7 +1590,7 @@ function App() {
   }, [participants]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || isSupabaseEnabled) {
       return;
     }
 
@@ -1119,7 +1598,7 @@ function App() {
   }, [groups]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || isSupabaseEnabled) {
       return;
     }
 
@@ -1127,7 +1606,7 @@ function App() {
   }, [staffAccounts]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || isSupabaseEnabled) {
       return;
     }
 
@@ -1138,7 +1617,7 @@ function App() {
   }, [participantFeedback]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || isSupabaseEnabled) {
       return;
     }
 
@@ -1149,7 +1628,7 @@ function App() {
   }, [accessRecoveryRequests]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || isSupabaseEnabled) {
       return;
     }
 
@@ -1168,6 +1647,85 @@ function App() {
     );
   }, [currentUser, activeStaffSection, sessionView]);
 
+  useEffect(() => {
+    if (!isSupabaseEnabled || !isRemoteReady) {
+      return;
+    }
+
+    const payload = JSON.stringify(
+      buildAuthorizedUserPayload(participants, staffAccounts, mentorAccounts),
+    );
+
+    if (remoteSyncCacheRef.current.authorizedUsers === payload) {
+      return;
+    }
+
+    remoteSyncCacheRef.current.authorizedUsers = payload;
+    setIsRemoteSyncing(true);
+
+    upsertAuthorizedUsersInSupabase(JSON.parse(payload))
+      .catch((error) => {
+        setRegisterNotice(error.message || "Não foi possível sincronizar os utilizadores.");
+      })
+      .finally(() => {
+        setIsRemoteSyncing(false);
+      });
+  }, [participants, staffAccounts, mentorAccounts, isRemoteReady]);
+
+  useEffect(() => {
+    if (!isSupabaseEnabled || !isRemoteReady) {
+      return;
+    }
+
+    const payload = JSON.stringify(groups);
+
+    if (remoteSyncCacheRef.current.groups === payload) {
+      return;
+    }
+
+    remoteSyncCacheRef.current.groups = payload;
+    replaceGroupsInSupabase(groups).catch((error) => {
+      setRegisterNotice(error.message || "Não foi possível sincronizar os grupos.");
+    });
+  }, [groups, isRemoteReady]);
+
+  useEffect(() => {
+    if (!isSupabaseEnabled || !isRemoteReady) {
+      return;
+    }
+
+    const decoratedFeedback = decorateFeedbackEntries(participantFeedback, participants);
+    const payload = JSON.stringify(decoratedFeedback);
+
+    if (remoteSyncCacheRef.current.feedback === payload) {
+      return;
+    }
+
+    remoteSyncCacheRef.current.feedback = payload;
+    replaceFeedbackEntriesInSupabase(decoratedFeedback).catch((error) => {
+      setRegisterNotice(error.message || "Não foi possível sincronizar o feedback.");
+    });
+  }, [participantFeedback, participants, isRemoteReady]);
+
+  useEffect(() => {
+    if (!isSupabaseEnabled || !isRemoteReady) {
+      return;
+    }
+
+    const payload = JSON.stringify(accessRecoveryRequests);
+
+    if (remoteSyncCacheRef.current.recoveryRequests === payload) {
+      return;
+    }
+
+    remoteSyncCacheRef.current.recoveryRequests = payload;
+    upsertRecoveryRequestsInSupabase(accessRecoveryRequests).catch((error) => {
+      setRegisterNotice(
+        error.message || "Não foi possível sincronizar os pedidos de recuperação.",
+      );
+    });
+  }, [accessRecoveryRequests, isRemoteReady]);
+
   const selectedParticipant =
     participants.find((participant) => participant.id === selectedParticipantId) ?? null;
   const editingRoom = ROOMS.find((room) => room.id === editingRoomId) ?? null;
@@ -1176,6 +1734,8 @@ function App() {
     participants,
     staffAccounts,
     mentorAccounts,
+    remoteAuthEmails,
+    isSupabaseEnabled,
   );
   const effectiveAuthMode = authState.mode === "login" ? "login" : authScreenMode;
 
@@ -1208,6 +1768,14 @@ function App() {
   };
 
   const handlePrimaryAdminRecovery = () => {
+    if (isSupabaseEnabled) {
+      setRegisterError("");
+      setRegisterNotice(
+        "Em modo Supabase, a recuperação do admin deve ser feita pelo painel Auth do Supabase ou por uma Edge Function de reset.",
+      );
+      return;
+    }
+
     const normalizedEmail = normalizeEmail(registerForm.email);
 
     if (!isPrimaryAdminEmail(normalizedEmail)) {
@@ -1259,7 +1827,7 @@ function App() {
     setRegisterNotice("Pedido de recuperação enviado para o dashboard do Daniel.");
   };
 
-  const handleRegister = (event) => {
+  const handleRegister = async (event) => {
     event.preventDefault();
 
     const normalizedEmail = normalizeEmail(registerForm.email);
@@ -1282,6 +1850,66 @@ function App() {
     } else if (authState.mode !== "login") {
       setRegisterError("Este e-mail ainda não tem conta criada. Usa a opção Criar conta.");
       return;
+    }
+
+    if (isSupabaseEnabled) {
+      if (!authState.isAuthorized) {
+        setRegisterError("Este e-mail não está autorizado para o Creative Camps® 3.");
+        return;
+      }
+
+      try {
+        setRegisterError("");
+        setRegisterNotice("");
+
+        if (effectiveAuthMode === "register") {
+          const signUpData = await signUpWithSupabase(normalizedEmail, registerForm.password);
+
+          if (!signUpData.session) {
+            setRegisterNotice(
+              "Conta criada. Se o teu projeto Supabase tiver confirmação por e-mail ativa, confirma primeiro o e-mail e depois inicia sessão.",
+            );
+            setAuthScreenMode("login");
+            setRegisterForm((currentForm) => ({
+              ...currentForm,
+              password: "",
+              confirmPassword: "",
+            }));
+            return;
+          }
+        } else {
+          await signInWithSupabase(normalizedEmail, registerForm.password);
+        }
+
+        const snapshot = await fetchRemoteSnapshot();
+        applyRemoteSnapshot(snapshot);
+
+        const authorizedUser = snapshot.authorizedUsers.find(
+          (candidate) => normalizeEmail(candidate.email) === normalizedEmail,
+        );
+
+        if (!authorizedUser) {
+          setRegisterError(
+            "A conta autenticou, mas não foi encontrado um perfil autorizado para este e-mail.",
+          );
+          return;
+        }
+
+        setCurrentUser(buildCurrentUserFromAuthorizedUser(authorizedUser));
+        setScreen(getScreenForRole(authorizedUser.role));
+        if (authorizedUser.role === "staff") {
+          setActiveStaffSection("home");
+        }
+        setRegisterForm((currentForm) => ({
+          ...currentForm,
+          password: "",
+          confirmPassword: "",
+        }));
+        return;
+      } catch (error) {
+        setRegisterError(error.message || "Não foi possível autenticar com o Supabase.");
+        return;
+      }
     }
 
     if (STAFF_DIRECTORY[normalizedEmail]) {
@@ -1429,6 +2057,13 @@ function App() {
       return {
         ok: false,
         error: "Esse estúdio já está ocupado noutro grupo no mesmo slot.",
+      };
+    }
+
+    if (groupDraft.participantIds.length > MAX_GROUP_PARTICIPANTS) {
+      return {
+        ok: false,
+        error: `Cada grupo pode ter no máximo ${MAX_GROUP_PARTICIPANTS} participantes.`,
       };
     }
 
@@ -1597,9 +2232,18 @@ function App() {
     );
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (isSupabaseEnabled) {
+      try {
+        await signOutWithSupabase();
+      } catch (error) {
+        setRegisterNotice(error.message || "Não foi possível terminar sessão no Supabase.");
+      }
+    }
+
     setCurrentUser(null);
     setRegisterError("");
+    setRegisterNotice("");
     setRegisterForm({
       fullName: "",
       email: "",
@@ -1634,10 +2278,18 @@ function App() {
         <RegisterScreen
           form={registerForm}
           error={registerError}
-          notice={registerNotice}
+          notice={
+            isSupabaseEnabled && isRemoteSyncing
+              ? "A sincronizar dados com o Supabase..."
+              : registerNotice
+          }
           authState={authState}
           authMode={effectiveAuthMode}
-          canRecoverPrimaryAdmin={isPrimaryAdminEmail(registerForm.email) && effectiveAuthMode === "login"}
+          canRecoverPrimaryAdmin={
+            !isSupabaseEnabled &&
+            isPrimaryAdminEmail(registerForm.email) &&
+            effectiveAuthMode === "login"
+          }
           canRequestRecovery={
             effectiveAuthMode === "login" &&
             authState.isAuthorized &&
@@ -1660,6 +2312,7 @@ function App() {
       {screen === "staff" && currentUser?.role === "staff" && (
         <StaffDashboard
           currentUser={currentUser}
+          isSupabaseMode={isSupabaseEnabled}
           participants={participants}
           staffAccounts={staffAccounts}
           mentorAccounts={mentorAccounts}
@@ -1692,6 +2345,8 @@ function App() {
               ...currentFeedback,
               [getFeedbackStorageKey(currentUser)]: {
                 message,
+                authorEmail: normalizeEmail(currentUser.email),
+                authorRole: currentUser.role,
                 updatedAt: new Date().toISOString(),
               },
             }))
@@ -1736,6 +2391,10 @@ function App() {
               ...currentFeedback,
               [participantId]: {
                 message,
+                authorEmail: normalizeEmail(
+                  participants.find((participant) => participant.id === participantId)?.email ?? "",
+                ),
+                authorRole: "participant",
                 updatedAt: new Date().toISOString(),
               },
             }))
@@ -1747,6 +2406,7 @@ function App() {
       {screen === "mentor" && currentUser?.role === "mentor" && (
         <MentorArea
           currentUser={currentUser}
+          isSupabaseMode={isSupabaseEnabled}
           participants={participants}
           groups={groups}
           onSaveGroup={saveGroup}
@@ -1770,6 +2430,8 @@ function App() {
               ...currentFeedback,
               [getFeedbackStorageKey(currentUser)]: {
                 message,
+                authorEmail: normalizeEmail(currentUser.email),
+                authorRole: currentUser.role,
                 updatedAt: new Date().toISOString(),
               },
             }))
@@ -2011,6 +2673,7 @@ function RegisterScreen({
 
 function StaffDashboard({
   currentUser,
+  isSupabaseMode,
   participants,
   staffAccounts,
   mentorAccounts,
@@ -2136,7 +2799,7 @@ function StaffDashboard({
           <div className="section-screen-header__top">
             <button
               type="button"
-              className="ghost-button"
+              className="secondary-button back-button"
               onClick={() => onSectionChange("home")}
             >
               Voltar ao dashboard
@@ -2208,6 +2871,7 @@ function StaffDashboard({
         <DashboardSupportPanels participants={participants} />
         {isPrimaryAdmin(currentUser) && (
           <CredentialManagerSection
+            isSupabaseMode={isSupabaseMode}
             entries={getCredentialEntries(participants, staffAccounts, mentorAccounts)}
             requests={accessRecoveryRequests}
             onSavePassword={onUpdatePassword}
@@ -2295,6 +2959,7 @@ function DashboardSupportPanels({ participants }) {
 }
 
 function CredentialManagerSection({
+  isSupabaseMode,
   entries,
   requests,
   onSavePassword,
@@ -2340,6 +3005,13 @@ function CredentialManagerSection({
           Esta área é exclusiva para `danieldacruz@maara.pt`. Aqui podes consultar e alterar
           passwords quando alguém pedir recuperação de acesso.
         </p>
+        {isSupabaseMode && (
+          <p className="helper-text">
+            O projeto está em modo Supabase. A recuperação continua visível aqui, mas a
+            gestão direta de palavras-passe deve passar para Supabase Auth ou para uma
+            Edge Function de reset.
+          </p>
+        )}
         {requestEntries.length === 0 ? (
           <p className="helper-text">
             Sem pedidos de recuperação pendentes. Os perfis só aparecem aqui quando alguém
@@ -2400,17 +3072,19 @@ function CredentialManagerSection({
                   >
                     Preparar recuperação
                   </button>
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={() => {
-                      onSavePassword(entry.email, drafts[entry.email] ?? "");
-                      onDismiss(entry.email);
-                      setSavedEmail(entry.email);
-                    }}
-                  >
-                    Guardar password
-                  </button>
+                  {!isSupabaseMode && (
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => {
+                        onSavePassword(entry.email, drafts[entry.email] ?? "");
+                        onDismiss(entry.email);
+                        setSavedEmail(entry.email);
+                      }}
+                    >
+                      Guardar password
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="ghost-button"
@@ -2666,6 +3340,9 @@ function GroupsSection({
     setIsComposerOpen(false);
   };
 
+  const selectedParticipantsCount = form.participantIds.length;
+  const hasReachedParticipantLimit = selectedParticipantsCount >= MAX_GROUP_PARTICIPANTS;
+
   const handleSaveOpenGroup = (event) => {
     event.preventDefault();
 
@@ -2835,10 +3512,15 @@ function GroupsSection({
 
             <div className="field">
               <span>Adicionar participantes</span>
+              <p className="helper-text">
+                {selectedParticipantsCount}/{MAX_GROUP_PARTICIPANTS} participantes selecionados.
+              </p>
               <div className="checkbox-list">
                 {participants.map((participant) => {
                   const assignedGroup = participantGroupMap[participant.id];
-                  const isUnavailable = Boolean(assignedGroup);
+                  const isSelected = form.participantIds.includes(participant.id);
+                  const isAtCapacity = hasReachedParticipantLimit && !isSelected;
+                  const isUnavailable = Boolean(assignedGroup) || isAtCapacity;
 
                   return (
                     <label
@@ -2853,15 +3535,20 @@ function GroupsSection({
                           {getParticipantRoomLabel(participant)}
                         </strong>
                         <span className="checkbox-card__meta">{participant.email}</span>
-                        {isUnavailable && (
+                        {assignedGroup && (
                           <span className="checkbox-card__status">
                             Indisponível - já está em {assignedGroup.studio}
+                          </span>
+                        )}
+                        {isAtCapacity && (
+                          <span className="checkbox-card__status">
+                            Limite atingido - máximo de {MAX_GROUP_PARTICIPANTS} participantes
                           </span>
                         )}
                       </div>
                       <input
                         type="checkbox"
-                        checked={form.participantIds.includes(participant.id)}
+                        checked={isSelected}
                         onChange={() => toggleParticipant(participant.id)}
                         disabled={isUnavailable}
                       />
@@ -4008,6 +4695,336 @@ function ModalShell({ title, children, onClose }) {
         {children}
       </div>
     </div>
+  );
+}
+
+function MerchStorePage({ onOpenPrivateArea }) {
+  const [selectedSizes, setSelectedSizes] = useState(() =>
+    Object.fromEntries(MERCH_PRODUCTS.map((product) => [product.id, product.sizes[0]])),
+  );
+  const [cartItems, setCartItems] = useState([]);
+  const [customer, setCustomer] = useState({
+    name: "",
+    email: "",
+    note: "",
+  });
+
+  const subtotal = cartItems.reduce((total, item) => total + item.price * item.quantity, 0);
+  const shipping = cartItems.length === 0 ? 0 : subtotal >= 90 ? 0 : 5.9;
+  const total = subtotal + shipping;
+  const canCheckout =
+    cartItems.length > 0 && customer.name.trim().length > 0 && customer.email.trim().length > 0;
+
+  const handleSizeChange = (productId, size) => {
+    setSelectedSizes((currentSizes) => ({
+      ...currentSizes,
+      [productId]: size,
+    }));
+  };
+
+  const handleAddToCart = (product) => {
+    const size = selectedSizes[product.id] ?? product.sizes[0];
+    const itemId = `${product.id}-${size}`;
+
+    setCartItems((currentItems) => {
+      const existingItem = currentItems.find((item) => item.id === itemId);
+
+      if (existingItem) {
+        return currentItems.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                quantity: item.quantity + 1,
+              }
+            : item,
+        );
+      }
+
+      return [
+        ...currentItems,
+        {
+          id: itemId,
+          productId: product.id,
+          name: product.name,
+          size,
+          price: product.price,
+          quantity: 1,
+        },
+      ];
+    });
+  };
+
+  const updateCartQuantity = (itemId, nextQuantity) => {
+    setCartItems((currentItems) =>
+      currentItems.flatMap((item) => {
+        if (item.id !== itemId) {
+          return item;
+        }
+
+        if (nextQuantity <= 0) {
+          return [];
+        }
+
+        return {
+          ...item,
+          quantity: nextQuantity,
+        };
+      }),
+    );
+  };
+
+  const handleCheckout = () => {
+    if (!canCheckout) {
+      return;
+    }
+
+    openExternalUrl(
+      buildMerchCheckoutLink({
+        customer,
+        cartItems,
+        shipping,
+        total,
+      }),
+    );
+  };
+
+  return (
+    <main className="storefront-frame">
+      <section className="hero-card storefront-hero animated-zoom">
+        <div className="storefront-hero__copy">
+          <span className="eyebrow">MAARA Merch</span>
+          <h1>Uma loja integrada no site para vender merch sem sair do universo MAARA.</h1>
+          <p>
+            Esta nova secção já permite apresentar produtos, escolher tamanhos, montar carrinho e
+            enviar um pedido completo diretamente para a equipa.
+          </p>
+
+          <div className="storefront-hero__actions">
+            <a href="#produtos" className="primary-button storefront-button-link">
+              Ver produtos
+            </a>
+            <button type="button" className="secondary-button" onClick={onOpenPrivateArea}>
+              Área privada
+            </button>
+          </div>
+        </div>
+
+        <div className="storefront-hero__visual">
+          <img src="/maara-logo.png" alt="MAARA" className="storefront-hero__logo" />
+          <div className="storefront-stat-grid">
+            <article className="storefront-stat-card">
+              <strong>{MERCH_PRODUCTS.length}</strong>
+              <span>Produtos prontos para vender</span>
+            </article>
+            <article className="storefront-stat-card">
+              <strong>Checkout leve</strong>
+              <span>Pedido por e-mail já funcional</span>
+            </article>
+            <article className="storefront-stat-card">
+              <strong>Preparado para evoluir</strong>
+              <span>Stripe ou Shopify podem entrar depois</span>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section className="storefront-highlights" aria-label="Vantagens da loja">
+        {STORE_HIGHLIGHTS.map((highlight) => (
+          <article key={highlight.title} className="panel-card storefront-highlight-card">
+            <span className="pill-badge pill-badge--soft">Loja</span>
+            <h2>{highlight.title}</h2>
+            <p>{highlight.body}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="storefront-layout">
+        <div>
+          <div className="section-intro storefront-section-intro" id="produtos">
+            <span className="eyebrow subtle">Catálogo</span>
+            <h2>Merch para lançar já</h2>
+            <p>
+              Os artigos estão configurados no código e podem ser trocados rapidamente quando a
+              coleção final estiver fechada.
+            </p>
+          </div>
+
+          <div className="storefront-product-grid">
+            {MERCH_PRODUCTS.map((product) => (
+              <article key={product.id} className="panel-card merch-card">
+                <div className={`merch-card__visual merch-card__visual--${product.accent}`}>
+                  <span className="pill-badge">{product.tag}</span>
+                  <strong>{product.name}</strong>
+                  <span>{formatPrice(product.price)}</span>
+                </div>
+
+                <div className="merch-card__content">
+                  <p>{product.description}</p>
+
+                  <ul className="merch-card__details">
+                    {product.details.map((detail) => (
+                      <li key={detail}>{detail}</li>
+                    ))}
+                  </ul>
+
+                  <label className="field">
+                    <span>Tamanho</span>
+                    <select
+                      value={selectedSizes[product.id]}
+                      onChange={(event) => handleSizeChange(product.id, event.target.value)}
+                    >
+                      {product.sizes.map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <button
+                    type="button"
+                    className="primary-button primary-button--full"
+                    onClick={() => handleAddToCart(product)}
+                  >
+                    Adicionar ao carrinho
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <aside className="panel-card storefront-cart">
+          <div className="panel-card__header">
+            <span className="eyebrow">Carrinho</span>
+            <h2>Resumo do pedido</h2>
+            <p>Versão inicial pronta para receber encomendas sem complicar a operação.</p>
+          </div>
+
+          {cartItems.length === 0 ? (
+            <div className="empty-card storefront-empty">
+              <h3>Nenhum artigo adicionado</h3>
+              <p>Escolhe as primeiras peças para ativar o checkout.</p>
+            </div>
+          ) : (
+            <div className="storefront-cart-list">
+              {cartItems.map((item) => (
+                <article key={item.id} className="storefront-cart-item">
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{item.size}</span>
+                  </div>
+
+                  <div className="storefront-cart-item__actions">
+                    <button
+                      type="button"
+                      className="ghost-button storefront-qty-button"
+                      onClick={() => updateCartQuantity(item.id, item.quantity - 1)}
+                    >
+                      -
+                    </button>
+                    <span>{item.quantity}</span>
+                    <button
+                      type="button"
+                      className="ghost-button storefront-qty-button"
+                      onClick={() => updateCartQuantity(item.id, item.quantity + 1)}
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  <strong>{formatPrice(item.price * item.quantity)}</strong>
+                </article>
+              ))}
+            </div>
+          )}
+
+          <div className="storefront-totals">
+            <div className="stat-row">
+              <span>Subtotal</span>
+              <strong>{formatPrice(subtotal)}</strong>
+            </div>
+            <div className="stat-row">
+              <span>Envio</span>
+              <strong>{shipping > 0 ? formatPrice(shipping) : "Grátis / a confirmar"}</strong>
+            </div>
+            <div className="stat-row storefront-total-row">
+              <span>Total estimado</span>
+              <strong>{formatPrice(total)}</strong>
+            </div>
+          </div>
+
+          <div className="form-grid storefront-checkout-form">
+            <label className="field">
+              <span>Nome</span>
+              <input
+                type="text"
+                value={customer.name}
+                onChange={(event) =>
+                  setCustomer((currentCustomer) => ({
+                    ...currentCustomer,
+                    name: event.target.value,
+                  }))
+                }
+                placeholder="Nome do cliente"
+              />
+            </label>
+
+            <label className="field">
+              <span>E-mail</span>
+              <input
+                type="email"
+                value={customer.email}
+                onChange={(event) =>
+                  setCustomer((currentCustomer) => ({
+                    ...currentCustomer,
+                    email: event.target.value,
+                  }))
+                }
+                placeholder="cliente@email.com"
+              />
+            </label>
+
+            <label className="field">
+              <span>Notas do pedido</span>
+              <textarea
+                rows="4"
+                value={customer.note}
+                onChange={(event) =>
+                  setCustomer((currentCustomer) => ({
+                    ...currentCustomer,
+                    note: event.target.value,
+                  }))
+                }
+                placeholder="Morada, cor pretendida, observações, etc."
+              />
+            </label>
+
+            <button
+              type="button"
+              className="primary-button primary-button--full"
+              disabled={!canCheckout}
+              onClick={handleCheckout}
+            >
+              Enviar pedido por e-mail
+            </button>
+
+            <p className="helper-text">
+              O checkout está configurado para enviar o resumo do carrinho para {SHOP_CONTACT_EMAIL}.
+            </p>
+          </div>
+        </aside>
+      </section>
+
+      <section className="storefront-faq">
+        {STORE_FAQS.map((item) => (
+          <article key={item.question} className="list-card storefront-faq-card">
+            <h3>{item.question}</h3>
+            <p>{item.answer}</p>
+          </article>
+        ))}
+      </section>
+    </main>
   );
 }
 
